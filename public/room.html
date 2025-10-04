@@ -138,6 +138,13 @@
             align-items: center;
             justify-content: center;
             z-index: 10;
+            padding: 6px;
+        }
+
+        .audio-indicator img {
+            width: 18px;
+            height: 18px;
+            filter: brightness(0) invert(1);
         }
 
         .audio-indicator.active {
@@ -167,6 +174,15 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            padding: 15px;
+        }
+
+        .control-btn svg,
+        .control-btn img {
+            width: 24px;
+            height: 24px;
+            fill: white;
+            filter: brightness(0) invert(1);
         }
 
         .control-btn:hover {
@@ -214,9 +230,15 @@
         <div id="participantCount">👥 Participants: <span id="count">1</span></div>
         <div id="videoGrid"></div>
         <div id="controls">
-            <button class="control-btn video" id="videoBtn" onclick="toggleVideo()" title="Toggle Camera">📹</button>
-            <button class="control-btn audio" id="audioBtn" onclick="toggleAudio()" title="Toggle Microphone">🎤</button>
-            <button class="control-btn leave" onclick="leaveRoom()" title="Leave Room">📞</button>
+            <button class="control-btn video" id="videoBtn" onclick="toggleVideo()" title="Toggle Camera">
+                <img src="/icons/video.svg" alt="Camera" id="videoIcon">
+            </button>
+            <button class="control-btn audio" id="audioBtn" onclick="toggleAudio()" title="Toggle Microphone">
+                <img src="/icons/microphone-solid-full.svg" alt="Microphone" id="audioIcon">
+            </button>
+            <button class="control-btn leave" onclick="leaveRoom()" title="Leave Room">
+                <img src="/icons/arrow-right-from-bracket-solid-full.svg" alt="Leave">
+            </button>
         </div>
     </div>
 
@@ -521,7 +543,10 @@
 
             const audioIndicator = document.createElement('div');
             audioIndicator.className = 'audio-indicator';
-            audioIndicator.textContent = '🎤';
+            const micIcon = document.createElement('img');
+            micIcon.src = '/icons/microphone-solid-full.svg';
+            micIcon.alt = 'Speaking';
+            audioIndicator.appendChild(micIcon);
 
             videoContainer.appendChild(video);
             videoContainer.appendChild(labelEl);
@@ -561,7 +586,16 @@
             videoEnabled = !videoEnabled;
             localStream.getVideoTracks()[0].enabled = videoEnabled;
             const btn = document.getElementById('videoBtn');
-            btn.textContent = videoEnabled ? '📹' : '📹';
+            const icon = document.getElementById('videoIcon');
+            
+            if (videoEnabled) {
+                icon.src = '/icons/video.svg';
+                icon.alt = 'Camera';
+            } else {
+                icon.src = '/icons/video-slash.svg';
+                icon.alt = 'Camera Off';
+            }
+            
             btn.classList.toggle('disabled', !videoEnabled);
         }
 
@@ -569,7 +603,16 @@
             audioEnabled = !audioEnabled;
             localStream.getAudioTracks()[0].enabled = audioEnabled;
             const btn = document.getElementById('audioBtn');
-            btn.textContent = audioEnabled ? '🎤' : '🔇';
+            const icon = document.getElementById('audioIcon');
+            
+            if (audioEnabled) {
+                icon.src = '/icons/microphone-solid-full.svg';
+                icon.alt = 'Microphone';
+            } else {
+                icon.src = '/icons/microphone-slash-solid-full.svg';
+                icon.alt = 'Microphone Off';
+            }
+            
             btn.classList.toggle('disabled', !audioEnabled);
         }
 
