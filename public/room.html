@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Room</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            color: white;
+            overflow: hidden;
+        }
+
+        #passwordScreen {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .password-container {
+            background: white;
+            padding: 50px;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 400px;
+            width: 90%;
+            text-align: center;
+        }
+
+        .password-container h2 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+
+        .password-container input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1em;
+            margin-bottom: 20px;
+        }
+
+        .password-container input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .password-container button {
+            width: 100%;
+            padding: 15px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1em;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .password-container button:hover {
+            background: #5568d3;
+        }
+
+        .error {
+            color: #f44336;
+            margin-top: 15px;
+            font-size: 0.9em;
+        }
+
+        #videoScreen {
+            display: none;
+            height: 100vh;
+            flex-direction: column;
+        }
+
+        #videoGrid {
+            flex: 1;
+            display: grid;
+            gap: 10px;
+            padding: 10px;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            grid-auto-rows: minmax(200px, 1fr);
+            overflow-y: auto;
+            max-height: calc(100vh - 100px);
+        }
+
+        .video-container {
+            position: relative;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .video-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            max-height: 100%;
+        }
+
+        .video-container.local video {
+            transform: scaleX(-1);
+        }
+
+        .video-label {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            z-index: 10;
+        }
+
+        .audio-indicator {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 30px;
+            height: 30px;
+            background: rgba(76, 175, 80, 0.8);
+            border-radius: 50%;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        .audio-indicator.active {
+            display: flex;
+        }
+
+        #controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            padding: 20px;
+            background: #2a2a2a;
+            position: sticky;
+            bottom: 0;
+            z-index: 100;
+            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .control-btn {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            font-size: 1.5em;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .control-btn:hover {
+            transform: scale(1.1);
+        }
+
+        .control-btn.video {
+            background: #667eea;
+        }
+
+        .control-btn.audio {
+            background: #4caf50;
+        }
+
+        .control-btn.leave {
+            background: #f44336;
+        }
+
+        .control-btn.disabled {
+            background: #666;
+        }
+
+        #participantCount {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 1em;
+        }
+    </style>
+</head>
+<body>
+    <div id="passwordScreen">
+        <div class="password-container">
+            <h2>🔒 Enter Room Password</h2>
+            <input type="password" id="roomPassword" placeholder="Enter password" />
+            <button onclick="verifyPassword()">Join Room</button>
+            <p class="error" id="passwordError" style="display: none;"></p>
+        </div>
+    </div>
+
+    <div id="videoScreen">
+        <div id="participantCount">👥 Participants: <span id="count">1</span></div>
+        <div id="videoGrid"></div>
+        <div id="controls">
+            <button class="control-btn video" id="videoBtn" onclick="toggleVideo()" title="Toggle Camera">📹</button>
+            <button class="control-btn audio" id="audioBtn" onclick="toggleAudio()" title="Toggle Microphone">🎤</button>
+            <button class="control-btn leave" onclick="leaveRoom()" title="Leave Room">📞</button>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomId = urlParams.get('id');
+        const userId = Math.random().toString(36).substring(2, 15);
+        
+        let socket;
+        let localStream;
+        let peers = {};
+        let videoEnabled = true;
+        let audioEnabled = true;
+
+        const configuration = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        };
+
+        async function verifyPassword() {
+            const password = document.getElementById('roomPassword').value;
+            const errorEl = document.getElementById('passwordError');
+
+            try {
+                const response = await fetch('/api/verify-room', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ roomId, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    errorEl.style.display = 'none';
+                    await initializeRoom();
+                } else {
+                    errorEl.textContent = data.error || 'Access denied';
+                    errorEl.style.display = 'block';
+                }
+            } catch (error) {
+                errorEl.textContent = 'Connection error. Please try again.';
+                errorEl.style.display = 'block';
+            }
+        }
+
+        async function initializeRoom() {
+            document.getElementById('passwordScreen').style.display = 'none';
+            document.getElementById('videoScreen').style.display = 'flex';
+
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                });
+
+                addVideoStream('local', localStream, 'You');
+
+                socket = io();
+
+                socket.on('connect', () => {
+                    console.log('Socket connected! Socket ID:', socket.id);
+                });
+
+                socket.on('disconnect', () => {
+                    console.log('Socket disconnected!');
+                });
+
+                console.log('Emitting join-room event:', { roomId, userId });
+                socket.emit('join-room', { roomId, userId });
+
+                socket.on('existing-users', (socketIds) => {
+                    console.log('Existing users in room:', socketIds);
+                    socketIds.forEach(socketId => {
+                        console.log('Creating connection to existing user:', socketId);
+                        createPeerConnection(socketId, true);
+                    });
+                });
+
+                socket.on('user-connected', (newSocketId) => {
+                    console.log('New user connected:', newSocketId);
+                    createPeerConnection(newSocketId, false);
+                    updateParticipantCount();
+                });
+
+                socket.on('user-disconnected', (disconnectedUserId) => {
+                    if (peers[disconnectedUserId]) {
+                        peers[disconnectedUserId].close();
+                        delete peers[disconnectedUserId];
+                        removeVideoStream(disconnectedUserId);
+                        updateParticipantCount();
+                    }
+                });
+
+                socket.on('offer', async ({ from, offer }) => {
+                    console.log('Received offer from:', from);
+                    let peer = peers[from];
+                    if (!peer) {
+                        console.log('Creating peer connection for incoming offer from:', from);
+                        peer = new RTCPeerConnection(configuration);
+                        peers[from] = peer;
+                        
+                        // Add local tracks
+                        localStream.getTracks().forEach(track => {
+                            console.log('Adding track to peer:', track.kind);
+                            peer.addTrack(track, localStream);
+                        });
+                        
+                        // Handle incoming tracks
+                        peer.ontrack = (event) => {
+                            console.log('Received track:', event.track.kind, 'from', from);
+                            addVideoStream(from, event.streams[0], `Participant`);
+                        };
+                        
+                        // Handle ICE candidates
+                        peer.onicecandidate = (event) => {
+                            if (event.candidate) {
+                                socket.emit('ice-candidate', {
+                                    to: from,
+                                    candidate: event.candidate,
+                                    from: socket.id
+                                });
+                            }
+                        };
+                        
+                        peer.oniceconnectionstatechange = () => {
+                            console.log('ICE state:', peer.iceConnectionState, 'for', from);
+                        };
+                    }
+                    
+                    try {
+                        await peer.setRemoteDescription(new RTCSessionDescription(offer));
+                        const answer = await peer.createAnswer();
+                        await peer.setLocalDescription(answer);
+                        console.log('Sending answer to:', from);
+                        socket.emit('answer', { to: from, answer, from: socket.id });
+                    } catch (err) {
+                        console.error('Error handling offer:', err);
+                    }
+                });
+
+                socket.on('answer', async ({ from, answer }) => {
+                    console.log('Received answer from:', from);
+                    const peer = peers[from];
+                    if (peer) {
+                        try {
+                            await peer.setRemoteDescription(new RTCSessionDescription(answer));
+                            console.log('Set remote description from answer');
+                        } catch (err) {
+                            console.error('Error setting remote description:', err);
+                        }
+                    } else {
+                        console.error('No peer found for answer from:', from);
+                    }
+                });
+
+                socket.on('ice-candidate', async ({ from, candidate }) => {
+                    console.log('Received ICE candidate from:', from);
+                    const peer = peers[from];
+                    if (peer && candidate) {
+                        try {
+                            await peer.addIceCandidate(new RTCIceCandidate(candidate));
+                            console.log('Added ICE candidate');
+                        } catch (err) {
+                            console.error('Error adding ICE candidate:', err);
+                        }
+                    } else if (!peer) {
+                        console.error('No peer found for ICE candidate from:', from);
+                    }
+                });
+
+                socket.on('room-error', ({ message }) => {
+                    alert(message);
+                    window.location.href = '/';
+                });
+
+            } catch (error) {
+                alert('Could not access camera/microphone. Please check permissions.');
+                console.error('Media error:', error);
+            }
+        }
+
+        function createPeerConnection(socketId, isInitiator) {
+            const peer = new RTCPeerConnection(configuration);
+            peers[socketId] = peer;
+
+            // Add all tracks from local stream
+            localStream.getTracks().forEach(track => {
+                console.log('Adding track:', track.kind, 'to peer', socketId);
+                peer.addTrack(track, localStream);
+            });
+
+            peer.ontrack = (event) => {
+                console.log('Received track:', event.track.kind, 'from peer', socketId);
+                const remoteStream = event.streams[0];
+                addVideoStream(socketId, remoteStream, `Participant ${Object.keys(peers).indexOf(socketId) + 1}`);
+            };
+
+            peer.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('ice-candidate', {
+                        to: socketId,
+                        candidate: event.candidate,
+                        from: socket.id
+                    });
+                }
+            };
+
+            peer.oniceconnectionstatechange = () => {
+                console.log('ICE connection state:', peer.iceConnectionState, 'for peer', socketId);
+            };
+
+            peer.onconnectionstatechange = () => {
+                console.log('Connection state:', peer.connectionState, 'for peer', socketId);
+            };
+
+            if (isInitiator) {
+                peer.createOffer({
+                    offerToReceiveAudio: true,
+                    offerToReceiveVideo: true
+                }).then(offer => {
+                    return peer.setLocalDescription(offer);
+                }).then(() => {
+                    socket.emit('offer', {
+                        to: socketId,
+                        offer: peer.localDescription,
+                        from: socket.id
+                    });
+                }).catch(err => {
+                    console.error('Error creating offer:', err);
+                });
+            }
+        }
+
+        function addVideoStream(id, stream, label) {
+            if (document.getElementById(`video-${id}`)) return;
+
+            const videoContainer = document.createElement('div');
+            videoContainer.className = `video-container ${id === 'local' ? 'local' : ''}`;
+            videoContainer.id = `video-${id}`;
+
+            const video = document.createElement('video');
+            video.srcObject = stream;
+            video.autoplay = true;
+            video.playsInline = true;
+            if (id === 'local') {
+                video.muted = true;
+            } else {
+                video.muted = false;
+                video.volume = 1.0;
+            }
+
+            const labelEl = document.createElement('div');
+            labelEl.className = 'video-label';
+            labelEl.textContent = label;
+
+            const audioIndicator = document.createElement('div');
+            audioIndicator.className = 'audio-indicator';
+            audioIndicator.textContent = '🎤';
+
+            videoContainer.appendChild(video);
+            videoContainer.appendChild(labelEl);
+            videoContainer.appendChild(audioIndicator);
+
+            document.getElementById('videoGrid').appendChild(videoContainer);
+
+            // Audio level detection
+            const audioContext = new AudioContext();
+            const source = audioContext.createMediaStreamSource(stream);
+            const analyser = audioContext.createAnalyser();
+            source.connect(analyser);
+            analyser.fftSize = 256;
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+            function checkAudioLevel() {
+                analyser.getByteFrequencyData(dataArray);
+                const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+                if (average > 20) {
+                    audioIndicator.classList.add('active');
+                } else {
+                    audioIndicator.classList.remove('active');
+                }
+                requestAnimationFrame(checkAudioLevel);
+            }
+            checkAudioLevel();
+        }
+
+        function removeVideoStream(id) {
+            const videoContainer = document.getElementById(`video-${id}`);
+            if (videoContainer) {
+                videoContainer.remove();
+            }
+        }
+
+        function toggleVideo() {
+            videoEnabled = !videoEnabled;
+            localStream.getVideoTracks()[0].enabled = videoEnabled;
+            const btn = document.getElementById('videoBtn');
+            btn.textContent = videoEnabled ? '📹' : '📹';
+            btn.classList.toggle('disabled', !videoEnabled);
+        }
+
+        function toggleAudio() {
+            audioEnabled = !audioEnabled;
+            localStream.getAudioTracks()[0].enabled = audioEnabled;
+            const btn = document.getElementById('audioBtn');
+            btn.textContent = audioEnabled ? '🎤' : '🔇';
+            btn.classList.toggle('disabled', !audioEnabled);
+        }
+
+        function leaveRoom() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+            if (socket) {
+                socket.disconnect();
+            }
+            window.location.href = '/';
+        }
+
+        function updateParticipantCount() {
+            const count = Object.keys(peers).length + 1;
+            document.getElementById('count').textContent = count;
+        }
+
+        document.getElementById('roomPassword').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                verifyPassword();
+            }
+        });
+
+        window.addEventListener('beforeunload', () => {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+        });
+    </script>
+</body>
+</html>
