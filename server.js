@@ -126,8 +126,9 @@ io.on('connection', (socket) => {
       if (room) {
         room.participants.delete(socket.id);
         
-        // Notify others in the room
-        socket.to(socket.roomId).emit('user-disconnected', socket.userId);
+        // Notify others in the room using socket.id (not userId)
+        socket.to(socket.roomId).emit('user-disconnected', socket.id);
+        console.log(`Notified room ${socket.roomId} that ${socket.id} disconnected`);
         
         console.log(`Room ${socket.roomId} now has ${room.participants.size} participants`);
         

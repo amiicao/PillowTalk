@@ -308,13 +308,14 @@
                     updateParticipantCount();
                 });
 
-                socket.on('user-disconnected', (disconnectedUserId) => {
-                    if (peers[disconnectedUserId]) {
-                        peers[disconnectedUserId].close();
-                        delete peers[disconnectedUserId];
-                        removeVideoStream(disconnectedUserId);
-                        updateParticipantCount();
+                socket.on('user-disconnected', (disconnectedSocketId) => {
+                    console.log('User disconnected:', disconnectedSocketId);
+                    if (peers[disconnectedSocketId]) {
+                        peers[disconnectedSocketId].close();
+                        delete peers[disconnectedSocketId];
                     }
+                    removeVideoStream(disconnectedSocketId);
+                    updateParticipantCount();
                 });
 
                 socket.on('offer', async ({ from, offer }) => {
@@ -433,10 +434,30 @@
 
             peer.oniceconnectionstatechange = () => {
                 console.log('ICE connection state:', peer.iceConnectionState, 'for peer', socketId);
+                if (peer.iceConnectionState === 'disconnected' || 
+                    peer.iceConnectionState === 'failed' || 
+                    peer.iceConnectionState === 'closed') {
+                    console.log('Peer connection lost, cleaning up:', socketId);
+                    removeVideoStream(socketId);
+                    if (peers[socketId]) {
+                        delete peers[socketId];
+                    }
+                    updateParticipantCount();
+                }
             };
 
             peer.onconnectionstatechange = () => {
                 console.log('Connection state:', peer.connectionState, 'for peer', socketId);
+                if (peer.connectionState === 'disconnected' || 
+                    peer.connectionState === 'failed' || 
+                    peer.connectionState === 'closed') {
+                    console.log('Peer connection ended, cleaning up:', socketId);
+                    removeVideoStream(socketId);
+                    if (peers[socketId]) {
+                        delete peers[socketId];
+                    }
+                    updateParticipantCount();
+                }
             };
 
             if (isInitiator) {
