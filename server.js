@@ -3,145 +3,234 @@ const http = require('http');
 const socketIo = require('socket.io');
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const server = http.createServer(app);
+
+// CRITICAL: Socket.IO CORS must allow ngrok domain
 const io = socketIo(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
+    origin: "*", // ngrok URLs change, so we allow all but use token auth
+    methods: ["GET", "POST"],
+    credentials: true
+  },
+  maxHttpBufferSize: 1e6 // 1MB limit
 });
 
-app.use(express.json());
+app.use(express.json({ limit: '10kb' }));
 app.use(express.static('public'));
 
-// Store active rooms in memory
-// Structure: { roomId: { password: hashedPassword, participants: Set, active: boolean } }
-const rooms = new Map();
-
-// Create a new room
-app.post('/api/create-room', async (req, res) => {
-  const { password } = req.body;
-  
-  if (!password || password.length < 4) {
-    return res.status(400).json({ error: 'Password must be at least 4 characters' });
-  }
-
-  const roomId = crypto.randomBytes(16).toString('hex');
-  const hashedPassword = await bcrypt.hash(password, 10);
-
-  rooms.set(roomId, {
-    password: hashedPassword,
-    participants: new Set(),
-    active: true,
-    createdAt: Date.now()
-  });
-
-  res.json({ 
-    roomId, 
-    link: `${req.protocol}://${req.get('host')}/room.html?id=${roomId}` 
-  });
+// CRITICAL: Rate limiting to prevent attacks
+const createRoomLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5,
+  message: 'Too many rooms created, try again later',
+  standardHeaders: true,
+  legacyHeaders: false
 });
 
-// Verify room password
-app.post('/api/verify-room', async (req, res) => {
+const passwordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: 'Too many password attempts, try again later',
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// Store active rooms
+const rooms = new Map();
+const ROOM_EXPIRY = 6 * 60 * 60 * 1000; // 6 hours (reasonable for a call with friends)
+
+// Validation helpers
+function isValidRoomId(roomId) {
+  return typeof roomId === 'string' && /^[a-f0-9]{32}$/.test(roomId);
+}
+
+function isValidPassword(password) {
+  return password && 
+         password.length >= 6  
+        //  /[A-Za-z]/.test(password) && 
+        //  /[0-9]/.test(password);
+}
+
+// CRITICAL: Socket authentication middleware
+io.use((socket, next) => {
+  const { roomId, token } = socket.handshake.auth;
+  
+  if (!roomId || !isValidRoomId(roomId)) {
+    return next(new Error('Invalid room'));
+  }
+  
+  const room = rooms.get(roomId);
+  if (!room || !room.active) {
+    return next(new Error('Room not found'));
+  }
+  
+  // CRITICAL: Verify auth token
+  if (!token || token !== room.token) {
+    return next(new Error('Unauthorized'));
+  }
+  
+  socket.roomId = roomId;
+  next();
+});
+
+// Clean expired rooms every hour
+setInterval(() => {
+  const now = Date.now();
+  for (const [roomId, room] of rooms.entries()) {
+    if (now - room.createdAt > ROOM_EXPIRY) {
+      room.active = false;
+      rooms.delete(roomId);
+      console.log(`Expired room: ${roomId}`);
+    }
+  }
+}, 60 * 60 * 1000);
+
+// Create room with rate limiting
+app.post('/api/create-room', createRoomLimiter, async (req, res) => {
+  const { password } = req.body;
+  
+  if (!isValidPassword(password)) {
+    return res.status(400).json({ 
+      error: 'Password must be at least 6 characters' 
+    });
+  }
+
+  try {
+    const roomId = crypto.randomBytes(16).toString('hex');
+    const hashedPassword = await bcrypt.hash(password, 12);
+    const token = crypto.randomBytes(32).toString('hex');
+
+    rooms.set(roomId, {
+      password: hashedPassword,
+      token: token,
+      participants: new Set(),
+      active: true,
+      createdAt: Date.now(),
+      maxParticipants: 10
+    });
+
+    // Support both HTTP and HTTPS (ngrok provides HTTPS)
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.get('host');
+
+    res.json({ 
+      roomId,
+      token, // Client needs this for socket auth
+      link: `${protocol}://${host}/room.html?id=${roomId}`
+    });
+
+    console.log(`✅ Room created: ${roomId} (expires in 6 hours)`);
+  } catch (error) {
+    console.error('Error creating room:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Verify password with rate limiting
+app.post('/api/verify-room', passwordLimiter, async (req, res) => {
   const { roomId, password } = req.body;
+
+  if (!isValidRoomId(roomId)) {
+    return res.status(400).json({ error: 'Invalid room ID' });
+  }
 
   const room = rooms.get(roomId);
   
   if (!room) {
-    return res.status(404).json({ error: 'Room not found or has ended' });
+    return res.status(404).json({ error: 'Room not found or expired' });
   }
 
   if (!room.active) {
-    return res.status(403).json({ error: 'This room has ended' });
+    return res.status(403).json({ error: 'Room has ended' });
   }
 
-  const isValid = await bcrypt.compare(password, room.password);
-  
-  if (!isValid) {
-    return res.status(401).json({ error: 'Incorrect password' });
+  // Check expiry
+  if (Date.now() - room.createdAt > ROOM_EXPIRY) {
+    room.active = false;
+    return res.status(403).json({ error: 'Room expired' });
   }
 
-  res.json({ success: true });
+  try {
+    const isValid = await bcrypt.compare(password, room.password);
+    
+    if (!isValid) {
+      console.log(`❌ Failed password attempt for room: ${roomId}`);
+      return res.status(401).json({ error: 'Incorrect password' });
+    }
+
+    console.log(`✅ Password verified for room: ${roomId}`);
+    res.json({ 
+      success: true,
+      token: room.token // Send auth token
+    });
+  } catch (error) {
+    console.error('Error verifying password:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // WebSocket signaling
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
+  const roomId = socket.roomId; // Set by auth middleware
 
-  socket.on('join-room', ({ roomId, userId }) => {
+  socket.on('join-room', ({ userId }) => {
     const room = rooms.get(roomId);
     
     if (!room || !room.active) {
-      socket.emit('room-error', { message: 'Room not found or has ended' });
+      socket.emit('room-error', { message: 'Room not available' });
+      return;
+    }
+
+    if (room.participants.size >= room.maxParticipants) {
+      socket.emit('room-error', { message: 'Room is full (max 10 people)' });
       return;
     }
 
     socket.join(roomId);
-    socket.roomId = roomId;
     socket.userId = userId;
     
-    // Get existing participants BEFORE adding new one
     const existingUsers = Array.from(room.participants);
-    
-    // Add new participant
     room.participants.add(socket.id);
 
-    console.log(`User ${socket.id} (${userId}) joined room ${roomId}`);
-    console.log(`Existing participants:`, existingUsers);
-    console.log(`Total participants now: ${room.participants.size}`);
+    console.log(`User ${socket.id} joined room ${roomId} (${room.participants.size} total)`);
 
-    // Send list of existing participants to the new user
     socket.emit('existing-users', existingUsers);
-
-    // Notify existing users about the new participant
     socket.to(roomId).emit('user-connected', socket.id);
-    console.log(`Notified room ${roomId} about new user: ${socket.id}`);
   });
 
-  // WebRTC signaling events
+  // WebRTC signaling
   socket.on('offer', ({ to, offer, from }) => {
-    console.log(`Relaying offer from ${from} to ${to}`);
     io.to(to).emit('offer', { from, offer });
   });
 
   socket.on('answer', ({ to, answer, from }) => {
-    console.log(`Relaying answer from ${from} to ${to}`);
     io.to(to).emit('answer', { from, answer });
   });
 
   socket.on('ice-candidate', ({ to, candidate, from }) => {
-    console.log(`Relaying ICE candidate from ${from} to ${to}`);
     io.to(to).emit('ice-candidate', { from, candidate });
   });
 
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
     
-    if (socket.roomId) {
-      const room = rooms.get(socket.roomId);
+    if (roomId) {
+      const room = rooms.get(roomId);
       
       if (room) {
         room.participants.delete(socket.id);
+        socket.to(roomId).emit('user-disconnected', socket.id);
         
-        // Notify others in the room using socket.id (not userId)
-        socket.to(socket.roomId).emit('user-disconnected', socket.id);
-        console.log(`Notified room ${socket.roomId} that ${socket.id} disconnected`);
+        console.log(`Room ${roomId} now has ${room.participants.size} participants`);
         
-        console.log(`Room ${socket.roomId} now has ${room.participants.size} participants`);
-        
-        // If room is empty, mark it as inactive
         if (room.participants.size === 0) {
           room.active = false;
-          console.log(`Room ${socket.roomId} has ended (no participants)`);
-          
-          // Clean up room after some time
-          setTimeout(() => {
-            rooms.delete(socket.roomId);
-            console.log(`Room ${socket.roomId} deleted from memory`);
-          }, 60000); // Delete after 1 minute
+          console.log(`Room ${roomId} ended (empty)`);
+          setTimeout(() => rooms.delete(roomId), 60000);
         }
       }
     }
@@ -150,5 +239,19 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`
+╔════════════════════════════════════════════════╗
+║  ☁️ Video Call Server Ready                    ║
+╟────────────────────────────────────────────────╢
+║  Local:  http://localhost:${PORT}              ║
+║                                                ║
+║  🔒 Security Features:                         ║
+║  ✅ Socket authentication                      ║
+║  ✅ Rate limiting (5 rooms/15min)              ║
+║  ✅ Password validation (6+ chars)             ║
+║  ✅ Room expiry (6 hours)                      ║
+║  ✅ Max 10 participants per room               ║
+╚════════════════════════════════════════════════╝
+
+  `);
 });

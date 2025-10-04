@@ -232,12 +232,20 @@
         let videoEnabled = true;
         let audioEnabled = true;
 
+        let authToken = null;
+
         const configuration = {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' }
             ]
         };
+
+        // Validate room ID
+        if (!roomId || !/^[a-f0-9]{32}$/.test(roomId)) {
+            alert('Invalid room link');
+            window.location.href = '/';
+        }
 
         async function verifyPassword() {
             const password = document.getElementById('roomPassword').value;
@@ -254,6 +262,7 @@
 
                 if (response.ok) {
                     errorEl.style.display = 'none';
+                    authToken = data.token; // Save auth token
                     await initializeRoom();
                 } else {
                     errorEl.textContent = data.error || 'Access denied';
@@ -281,18 +290,28 @@
 
                 addVideoStream('local', localStream, 'You');
 
-                socket = io();
+                // Connect with authentication token
+                socket = io({
+                    auth: {
+                        roomId: roomId,
+                        token: authToken
+                    }
+                });
 
                 socket.on('connect', () => {
                     console.log('Socket connected! Socket ID:', socket.id);
+                    socket.emit('join-room', { userId });
+                });
+
+                socket.on('connect_error', (error) => {
+                    console.error('Connection error:', error.message);
+                    alert('Failed to connect: ' + error.message);
+                    window.location.href = '/';
                 });
 
                 socket.on('disconnect', () => {
                     console.log('Socket disconnected!');
                 });
-
-                console.log('Emitting join-room event:', { roomId, userId });
-                socket.emit('join-room', { roomId, userId });
 
                 socket.on('existing-users', (socketIds) => {
                     console.log('Existing users in room:', socketIds);
