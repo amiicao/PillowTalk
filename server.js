@@ -6,6 +6,8 @@ const bcrypt = require('bcrypt');
 const rateLimit = require('express-rate-limit');
 
 const app = express();
+app.set('trust proxy', 1);
+
 const server = http.createServer(app);
 
 // CRITICAL: Socket.IO CORS must allow ngrok domain
