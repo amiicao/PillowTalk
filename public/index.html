@@ -223,7 +223,9 @@
             </div>
             <div class="link-display" id="linkDisplay">
                 <p><strong>Room Created!</strong></p>
-                <p class="link-text" id="roomLink"></p>
+                <p>
+                    <a class="link-text" id="roomLink" href="#" target="_blank"></a>
+                </p>
                 <button class="copy-btn" onclick="copyLink()">Copy Link</button>
                 <p class="success-message" id="copySuccess" style="display: none;">Link copied!</p>
             </div>
@@ -268,7 +270,9 @@
                 const data = await response.json();
 
                 if (response.ok) {
-                    document.getElementById('roomLink').textContent = data.link;
+                    const linkElem = document.getElementById('roomLink');
+                    linkElem.textContent = data.link;
+                    linkElem.href = data.link;   // ✅ makes it clickable
                     document.getElementById('linkDisplay').classList.add('active');
                     window.generatedLink = data.link;
                 } else {
