@@ -206,7 +206,7 @@
 <body>
     <div class="container">
         <h1>☁️ Pillow Talk</h1>
-        <p class="subtitle">Create a secure video room</p>
+        <p class="subtitle">safe and cozy</p>
         <button class="create-btn" onclick="openModal()">Create New Room</button>
     </div>
 
@@ -215,7 +215,7 @@
             <h2>Create a New Room</h2>
             <div class="input-group">
                 <label for="password">Set Room Password</label>
-                <input type="password" id="password" placeholder="Enter a secure password (min 4 characters)" />
+                <input type="password" id="password" placeholder="Enter a secure password (min 6 characters)" />
             </div>
             <div class="btn-group">
                 <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -249,7 +249,7 @@
             const errorMsg = document.getElementById('errorMessage');
             
             if (password.length < 4) {
-                errorMsg.textContent = 'Password must be at least 4 characters';
+                errorMsg.textContent = 'Password must be at least 6 characters';
                 errorMsg.style.display = 'block';
                 return;
             }
