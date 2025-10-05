@@ -198,6 +198,10 @@
             background: #4caf50;
         }
 
+        .control-btn.share-screen {
+            background: #764ba2;
+        }
+
         .control-btn.leave {
             background: #f44336;
         }
@@ -237,6 +241,9 @@
             </button>
             <button class="control-btn audio" id="audioBtn" onclick="toggleAudio()" title="Toggle Microphone">
                 <img src="/icons/microphone-solid-full.svg" alt="Microphone" id="audioIcon">
+            </button>
+            <button class="control-btn share-screen" id="share-screen" title="Share Screen">
+                <img src="/icons/share-screen.svg" alt="Screen" id="shareScreenIcon">
             </button>
             <button class="control-btn leave" onclick="leaveRoom()" title="Leave Room">
                 <img src="/icons/arrow-right-from-bracket-solid-full.svg" alt="Leave">
@@ -694,6 +701,43 @@
         document.getElementById('roomPassword').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 verifyPassword();
+            }
+        });
+
+        document.getElementById('share-screen').addEventListener('click', async () => {
+            try {
+                const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                const screenTrack = screenStream.getVideoTracks()[0];
+
+                // Show local screen in the grid (just like a participant video)
+                addVideoStream(screenStream, "My Screen");
+
+                // Add this screen track as a new sender to each peer connection
+                for (let peerId in peers) {
+                    peers[peerId].addTrack(screenTrack, screenStream);
+                }
+
+                // When user stops screen share, remove it
+                screenTrack.onended = () => {
+                    // Remove from all peers
+                    for (let peerId in peers) {
+                        const sender = peers[peerId].getSenders().find(s => s.track === screenTrack);
+                        if (sender) {
+                            peers[peerId].removeTrack(sender);
+                        }
+                    }
+
+                    // Remove the screen video element from the grid
+                    const videos = document.querySelectorAll("#video-grid video");
+                    videos.forEach(v => {
+                        if (v.srcObject === screenStream) {
+                            v.parentElement.remove(); // remove wrapper div
+                        }
+                    });
+                };
+
+            } catch (err) {
+                console.error("Error sharing screen:", err);
             }
         });
 
