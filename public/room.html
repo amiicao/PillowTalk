@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -216,6 +217,7 @@
         }
     </style>
 </head>
+
 <body>
     <div id="passwordScreen">
         <div class="password-container">
@@ -247,7 +249,7 @@
         const urlParams = new URLSearchParams(window.location.search);
         const roomId = urlParams.get('id');
         const userId = Math.random().toString(36).substring(2, 15);
-        
+
         let socket;
         let localStream;
         let peers = {};
@@ -366,19 +368,19 @@
                         console.log('Creating peer connection for incoming offer from:', from);
                         peer = new RTCPeerConnection(configuration);
                         peers[from] = peer;
-                        
+
                         // Add local tracks
                         localStream.getTracks().forEach(track => {
                             console.log('Adding track to peer:', track.kind);
                             peer.addTrack(track, localStream);
                         });
-                        
+
                         // Handle incoming tracks
                         peer.ontrack = (event) => {
                             console.log('Received track:', event.track.kind, 'from', from);
                             addVideoStream(from, event.streams[0], `Participant`);
                         };
-                        
+
                         // Handle ICE candidates
                         peer.onicecandidate = (event) => {
                             if (event.candidate) {
@@ -389,12 +391,12 @@
                                 });
                             }
                         };
-                        
+
                         peer.oniceconnectionstatechange = () => {
                             console.log('ICE state:', peer.iceConnectionState, 'for', from);
                         };
                     }
-                    
+
                     try {
                         await peer.setRemoteDescription(new RTCSessionDescription(offer));
                         const answer = await peer.createAnswer();
@@ -475,8 +477,8 @@
 
             peer.oniceconnectionstatechange = () => {
                 console.log('ICE connection state:', peer.iceConnectionState, 'for peer', socketId);
-                if (peer.iceConnectionState === 'disconnected' || 
-                    peer.iceConnectionState === 'failed' || 
+                if (peer.iceConnectionState === 'disconnected' ||
+                    peer.iceConnectionState === 'failed' ||
                     peer.iceConnectionState === 'closed') {
                     console.log('Peer connection lost, cleaning up:', socketId);
                     removeVideoStream(socketId);
@@ -489,8 +491,8 @@
 
             peer.onconnectionstatechange = () => {
                 console.log('Connection state:', peer.connectionState, 'for peer', socketId);
-                if (peer.connectionState === 'disconnected' || 
-                    peer.connectionState === 'failed' || 
+                if (peer.connectionState === 'disconnected' ||
+                    peer.connectionState === 'failed' ||
                     peer.connectionState === 'closed') {
                     console.log('Peer connection ended, cleaning up:', socketId);
                     removeVideoStream(socketId);
@@ -584,36 +586,94 @@
 
         function toggleVideo() {
             videoEnabled = !videoEnabled;
-            localStream.getVideoTracks()[0].enabled = videoEnabled;
-            const btn = document.getElementById('videoBtn');
-            const icon = document.getElementById('videoIcon');
-            
+            const videoTrack = localStream.getVideoTracks()[0];
+
             if (videoEnabled) {
-                icon.src = '/icons/video.svg';
-                icon.alt = 'Camera';
+                // Need to get a new video track
+                navigator.mediaDevices.getUserMedia({ video: true })
+                    .then(stream => {
+                        const newVideoTrack = stream.getVideoTracks()[0];
+
+                        // Replace the track in local stream
+                        localStream.removeTrack(videoTrack);
+                        localStream.addTrack(newVideoTrack);
+
+                        // Update the video element
+                        const localVideo = document.querySelector('#video-local video');
+                        if (localVideo) {
+                            localVideo.srcObject = localStream;
+                        }
+
+                        // Replace track in all peer connections
+                        Object.values(peers).forEach(peer => {
+                            const sender = peer.getSenders().find(s => s.track && s.track.kind === 'video');
+                            if (sender) {
+                                sender.replaceTrack(newVideoTrack);
+                            }
+                        });
+
+                        document.getElementById('videoIcon').src = '/icons/video.svg';
+                        document.getElementById('videoIcon').alt = 'Camera';
+                        document.getElementById('videoBtn').classList.remove('disabled');
+                    })
+                    .catch(err => {
+                        console.error('Error re-enabling camera:', err);
+                        videoEnabled = false;
+                    });
             } else {
-                icon.src = '/icons/video-slash.svg';
-                icon.alt = 'Camera Off';
+                // Stop the track completely
+                videoTrack.stop();
+
+                document.getElementById('videoIcon').src = '/icons/video-slash.svg';
+                document.getElementById('videoIcon').alt = 'Camera Off';
+                document.getElementById('videoBtn').classList.add('disabled');
             }
-            
-            btn.classList.toggle('disabled', !videoEnabled);
         }
 
         function toggleAudio() {
             audioEnabled = !audioEnabled;
-            localStream.getAudioTracks()[0].enabled = audioEnabled;
-            const btn = document.getElementById('audioBtn');
-            const icon = document.getElementById('audioIcon');
-            
+            const audioTrack = localStream.getAudioTracks()[0];
+
             if (audioEnabled) {
-                icon.src = '/icons/microphone-solid-full.svg';
-                icon.alt = 'Microphone';
+                // Get new audio track
+                navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                })
+                    .then(stream => {
+                        const newAudioTrack = stream.getAudioTracks()[0];
+
+                        // Replace in local stream
+                        localStream.removeTrack(audioTrack);
+                        localStream.addTrack(newAudioTrack);
+
+                        // Replace in all peer connections
+                        Object.values(peers).forEach(peer => {
+                            const sender = peer.getSenders().find(s => s.track && s.track.kind === 'audio');
+                            if (sender) {
+                                sender.replaceTrack(newAudioTrack);
+                            }
+                        });
+
+                        document.getElementById('audioIcon').src = '/icons/microphone-solid-full.svg';
+                        document.getElementById('audioIcon').alt = 'Microphone';
+                        document.getElementById('audioBtn').classList.remove('disabled');
+                    })
+                    .catch(err => {
+                        console.error('Error re-enabling microphone:', err);
+                        audioEnabled = false;
+                    });
             } else {
-                icon.src = '/icons/microphone-slash-solid-full.svg';
-                icon.alt = 'Microphone Off';
+                // Stop the track completely
+                audioTrack.stop();
+
+                document.getElementById('audioIcon').src = '/icons/microphone-slash-solid-full.svg';
+                document.getElementById('audioIcon').alt = 'Microphone Off';
+                document.getElementById('audioBtn').classList.add('disabled');
             }
-            
-            btn.classList.toggle('disabled', !audioEnabled);
         }
 
         function leaveRoom() {
@@ -644,4 +704,5 @@
         });
     </script>
 </body>
+
 </html>
